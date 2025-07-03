@@ -1,7 +1,7 @@
 const std = @import("std");
 const print = std.debug.print;
 
-// English letter frequency (from most to least common)
+// English letter frequencies (from most to least common)
 const LETTER_FREQUENCIES = "etaoinshrdlcumwfgypbvkjxqz";
 
 // Color codes for terminal output
@@ -13,12 +13,18 @@ const Colors = struct {
     const BLUE = "\x1b[34m";
     const CYAN = "\x1b[36m";
     const BOLD = "\x1b[1m";
+    const RED = "\x11b[31m";
 };
 
 const Feedback = enum {
     green, // correct letter in correct position
     yellow, // correct letter in wrong position
     grey, // letter not in word at all
+};
+
+const AppMode = enum {
+    solver,
+    art_tool,
 };
 
 const WordleSolver = struct {
@@ -124,6 +130,58 @@ const WordleSolver = struct {
         return true;
     }
 
+    // Calculate feedback when comparing a guess with the target answer
+    pub fn calculateFeedback(guess: []const u8, answer: []const u8) [5]Feedback {
+        var feedback: [5]Feedback = [_]Feedback{.grey} ** 5;
+        var used = [_]bool{false} ** 5;
+
+        // First pass: find green matches
+        for (0..5) |i| {
+            if (guess[i] == answer[i]) {
+                feedback[i] = .green;
+                used[i] = true;
+            }
+        }
+
+        // Second pass: find yellow matches
+        for (0..5) |i| {
+            if (feedback[i] == .grey) {
+                for (0..5) |j| {
+                    if (!used[j] and guess[i] == answer[j]) {
+                        feedback[i] = .yellow;
+                        used[j] = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return feedback;
+    }
+
+    // Find words that produce a specific feedback pattern when compared with the answer
+    pub fn findWordsThatMatch(self: *Self, answer: []const u8, desired_feedback: [5]Feedback) !std.ArrayList([]const u8) {
+        var matches = std.ArrayList([]const u8).init(self.allocator);
+
+        for (self.words.items) |word| {
+            const feedback = calculateFeedback(word, answer);
+            
+            var is_match = true;
+            for (feedback, desired_feedback) |actual, desired| {
+                if (actual != desired) {
+                    is_match = false;
+                    break;
+                }
+            }
+            
+            if (is_match) {
+                try matches.append(try self.allocator.dupe(u8, word));
+            }
+        }
+
+        return matches;
+    }
+
     fn hasRepeatedLetters(word: []const u8) bool {
         var seen: [26]bool = [_]bool{false} ** 26;
         for (word) |char| {
@@ -216,6 +274,13 @@ fn parseFeedback(input: []const u8) ![5]Feedback {
     return feedback;
 }
 
+fn printFeedbackInfo() void {
+    print("\n{s}Feedback Guide:{s}\n", .{ Colors.BOLD, Colors.RESET });
+    print("  {s}g{s} or {s}G{s} = {s}GREEN{s} (correct letter, correct position)\n", .{ Colors.GREEN, Colors.RESET, Colors.GREEN, Colors.RESET, Colors.GREEN, Colors.RESET });
+    print("  {s}y{s} or {s}Y{s} = {s}YELLOW{s} (correct letter, wrong position)\n", .{ Colors.YELLOW, Colors.RESET, Colors.YELLOW, Colors.RESET, Colors.YELLOW, Colors.RESET });
+    print("  {s}b{s}, {s}r{s}, {s}B{s} or {s}R{s} = {s}GREY{s} (letter not in word)\n", .{ Colors.GREY, Colors.RESET, Colors.GREY, Colors.RESET, Colors.GREY, Colors.RESET, Colors.GREY, Colors.RESET, Colors.GREY, Colors.RESET });
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -226,15 +291,43 @@ pub fn main() !void {
 
     try solver.loadWords("solutions.txt");
 
-    print("{s}{s}🎯 WORDLE SOLVER 🎯{s}\n", .{ Colors.BOLD, Colors.CYAN, Colors.RESET });
+    print("{s}{s}🎮 WORDLE TOOLKIT 🎮{s}\n", .{ Colors.BOLD, Colors.CYAN, Colors.RESET });
+    print("Choose mode:\n", .{});
+    print("  {s}1{s} - Wordle Solver (help solve a puzzle)\n", .{ Colors.GREEN, Colors.RESET });
+    print("  {s}2{s} - Wordle Art Tool (find words that create specific patterns)\n", .{ Colors.BLUE, Colors.RESET });
+    
+    const stdin = std.io.getStdIn().reader();
+    var buf: [256]u8 = undefined;
+    
+    print("\n{s}Choose mode (1 or 2):{s} ", .{ Colors.BOLD, Colors.RESET });
+    
+    const mode: AppMode = blk: {
+        if (try stdin.readUntilDelimiterOrEof(buf[0..], '\n')) |input| {
+            const trimmed = std.mem.trim(u8, input, " \r\n");
+            if (std.mem.eql(u8, trimmed, "2")) {
+                break :blk .art_tool;
+            }
+        }
+        break :blk .solver; // Default to solver
+    };
+    
+    switch (mode) {
+        .solver => try runSolverMode(&solver, stdin, &buf),
+        .art_tool => try runArtToolMode(&solver, stdin, &buf),
+    }
+
+    print("{s}👋 Goodbye!{s}\n", .{ Colors.CYAN, Colors.RESET });
+}
+
+fn runSolverMode(solver: *WordleSolver, stdin: std.fs.File.Reader, buf: *[256]u8) !void {
+    print("\n{s}{s}🎯 WORDLE SOLVER MODE 🎯{s}\n", .{ Colors.BOLD, Colors.CYAN, Colors.RESET });
     print("{s}Commands:{s}\n", .{ Colors.BOLD, Colors.RESET });
     print("  {s}suggest{s}             - Get a word suggestion\n", .{ Colors.GREEN, Colors.RESET });
     print("  {s}feedback <word> <code>{s} - Enter feedback ({s}g{s}=green, {s}y{s}=yellow, {s}b/r{s}=grey)\n", .{ Colors.GREEN, Colors.RESET, Colors.GREEN, Colors.RESET, Colors.YELLOW, Colors.RESET, Colors.GREY, Colors.RESET });
     print("  {s}show{s}                - Show possible words\n", .{ Colors.GREEN, Colors.RESET });
     print("  {s}quit{s}                - Exit\n\n", .{ Colors.GREEN, Colors.RESET });
 
-    const stdin = std.io.getStdIn().reader();
-    var buf: [256]u8 = undefined;
+    printFeedbackInfo();
 
     // Suggest initial word
     if (solver.getSuggestion()) |suggestion| {
@@ -275,7 +368,7 @@ pub fn main() !void {
                 }
 
                 const feedback = parseFeedback(feedback_str) catch {
-                    print("{s}❌ Feedback must be 5 characters ({s}g{s}=green, {s}y{s}=yellow, {s}b/r{s}=grey){s}\n", .{ Colors.YELLOW, Colors.GREEN, Colors.YELLOW, Colors.YELLOW, Colors.YELLOW, Colors.GREY, Colors.YELLOW, Colors.RESET });
+                    printFeedbackInfo();
                     continue;
                 };
 
@@ -291,6 +384,83 @@ pub fn main() !void {
             }
         }
     }
+}
 
-    print("{s}👋 Goodbye!{s}\n", .{ Colors.CYAN, Colors.RESET });
+fn runArtToolMode(solver: *WordleSolver, stdin: std.fs.File.Reader, buf: *[256]u8) !void {
+    print("\n{s}{s}🎨 WORDLE ART TOOL MODE 🎨{s}\n", .{ Colors.BOLD, Colors.BLUE, Colors.RESET });
+    print("This mode helps you find words that create specific patterns against a target word.\n\n", .{});
+    
+    print("Enter the target answer word: ", .{});
+    const answer = blk: {
+        if (try stdin.readUntilDelimiterOrEof(buf[0..], '\n')) |input| {
+            const trimmed = std.mem.trim(u8, input, " \r\n");
+            if (trimmed.len != 5) {
+                print("{s}❌ Word must be exactly 5 letters. Using 'hello' as default.{s}\n", .{ Colors.YELLOW, Colors.RESET });
+                break :blk "hello";
+            }
+            var word_buf: [5]u8 = undefined;
+            for (trimmed, 0..) |char, i| {
+                word_buf[i] = std.ascii.toLower(char);
+            }
+            break :blk word_buf[0..5];
+        } else {
+            print("{s}❌ Using 'hello' as default answer.{s}\n", .{ Colors.YELLOW, Colors.RESET });
+            break :blk "hello";
+        }
+    };
+
+    print("\n{s}Target word set to: {s}{s}{s}\n", .{ Colors.BOLD, Colors.CYAN, answer, Colors.RESET });
+    print("{s}Instructions:{s}\n", .{ Colors.BOLD, Colors.RESET });
+    print("  • Enter a pattern like {s}GBGBG{s} to find words that create that pattern\n", .{ Colors.CYAN, Colors.RESET });
+    print("  • Type {s}quit{s} to exit\n\n", .{ Colors.RED, Colors.RESET });
+    
+    printFeedbackInfo();
+
+    while (true) {
+        print("\n{s}Enter desired pattern (e.g., GBBGY) or 'quit':{s} ", .{ Colors.BOLD, Colors.RESET });
+
+        if (try stdin.readUntilDelimiterOrEof(buf[0..], '\n')) |input| {
+            const trimmed = std.mem.trim(u8, input, " \r\n");
+
+            if (std.mem.eql(u8, trimmed, "quit")) {
+                break;
+            }
+
+            const desired_feedback = parseFeedback(trimmed) catch {
+                print("{s}❌ Invalid pattern format. Pattern must be 5 characters using G, Y, B/R.{s}\n", .{ Colors.YELLOW, Colors.RESET });
+                printFeedbackInfo();
+                continue;
+            };
+
+            // Find words that produce this pattern
+            var matches = try solver.findWordsThatMatch(answer, desired_feedback);
+            defer {
+                for (matches.items) |word| {
+                    solver.allocator.free(word);
+                }
+                matches.deinit();
+            }
+
+            if (matches.items.len == 0) {
+                print("{s}❌ No words found that produce this pattern against '{s}'.{s}\n", .{ Colors.YELLOW, answer, Colors.RESET });
+            } else {
+                print("{s}✓ Found {} words that produce this pattern against '{s}':{s}\n", .{ Colors.GREEN, matches.items.len, answer, Colors.RESET });
+                
+                const show_count = @min(matches.items.len, 10);
+                for (matches.items[0..show_count], 0..) |word, i| {
+                    if (i > 0 and i % 5 == 0) print("\n", .{});
+                    print("{s}{}{s}. {s}", .{ Colors.CYAN, i + 1, Colors.RESET, word });
+                    
+                    if (i < show_count - 1) {
+                        print("  ", .{});
+                    }
+                }
+                print("\n", .{});
+                
+                if (matches.items.len > 10) {
+                    print("{s}... and {} more words{s}\n", .{ Colors.GREY, matches.items.len - 10, Colors.RESET });
+                }
+            }
+        }
+    }
 }

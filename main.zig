@@ -13,7 +13,7 @@ const Colors = struct {
     const BLUE = "\x1b[34m";
     const CYAN = "\x1b[36m";
     const BOLD = "\x1b[1m";
-    const RED = "\x11b[31m";
+    const RED = "\x1b[31m";
 };
 
 const Feedback = enum {
@@ -325,7 +325,7 @@ fn runSolverMode(solver: *WordleSolver, stdin: std.fs.File.Reader, buf: *[256]u8
     print("  {s}suggest{s}             - Get a word suggestion\n", .{ Colors.GREEN, Colors.RESET });
     print("  {s}feedback <word> <code>{s} - Enter feedback ({s}g{s}=green, {s}y{s}=yellow, {s}b/r{s}=grey)\n", .{ Colors.GREEN, Colors.RESET, Colors.GREEN, Colors.RESET, Colors.YELLOW, Colors.RESET, Colors.GREY, Colors.RESET });
     print("  {s}show{s}                - Show possible words\n", .{ Colors.GREEN, Colors.RESET });
-    print("  {s}quit{s}                - Exit\n\n", .{ Colors.GREEN, Colors.RESET });
+    print("  {s}quit{s}                - Exit\n\n", .{ Colors.RED, Colors.RESET });
 
     printFeedbackInfo();
 
